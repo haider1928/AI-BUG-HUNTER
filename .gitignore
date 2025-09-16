@@ -1,3 +1,8 @@
+.gitignore
+googleai.key
+_shit.py
+api.key
+
 # OS generated files
 .DS_Store
 Thumbs.db
