@@ -1,4 +1,4 @@
-from ai import ai_assistant, AICyberSecurityAssistant
+from brain.ai import ai_assistant, AICyberSecurityAssistant
 from command_executer import CommandExecutor
 from time import sleep
 import random
@@ -115,7 +115,7 @@ class PentestAutomation:
             self.context = f"{self.context}\nLast command output: {output}"
             
             # Safety check - don't let context grow too large
-            if len(self.context) > 4000:
+            if len(self.context) > 4000:       # we are gonna apply ai filter soon or somethign
                 self.context = self.context[-4000:]
                 
         logger.info(f"🏁 Pentest automation completed after {self.iteration} iterations")
