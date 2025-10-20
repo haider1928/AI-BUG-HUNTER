@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <link href=/resources/labheader/css/academyLabHeader.css rel=stylesheet>
+        <link href=/resources/css/labsEcommerce.css rel=stylesheet>
+        <title>SQL injection with filter bypass via XML encoding</title>
+    </head>
+    <body>
+        <script src="/resources/labheader/js/labHeader.js"></script>
+        <div id="academyLabHeader">
+            <section class='academyLabBanner'>
+                <div class=container>
+                    <div class=logo></div>
+                        <div class=title-container>
+                            <h2>SQL injection with filter bypass via XML encoding</h2>
+                            <a class=link-back href='https://portswigger.net/web-security/sql-injection/lab-sql-injection-with-filter-bypass-via-xml-encoding'>
+                                Back&nbsp;to&nbsp;lab&nbsp;description&nbsp;
+                                <svg version=1.1 id=Layer_1 xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' x=0px y=0px viewBox='0 0 28 30' enable-background='new 0 0 28 30' xml:space=preserve title=back-arrow>
+                                    <g>
+                                        <polygon points='1.4,0 0,1.2 12.6,15 0,28.8 1.4,30 15.1,15'></polygon>
+                                        <polygon points='14.3,0 12.9,1.2 25.6,15 12.9,28.8 14.3,30 28,15'></polygon>
+                                    </g>
+                                </svg>
+                            </a>
+                        </div>
+                        <div class='widgetcontainer-lab-status is-notsolved'>
+                            <span>LAB</span>
+                            <p>Not solved</p>
+                            <span class=lab-status-icon></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div theme="ecommerce">
+            <section class="maincontainer">
+                <div class="container">
+                    <header class="navigation-header">
+                        <section class="top-links">
+                            <a href=/>Home</a><p>|</p>
+                            <a href="/my-account">My account</a><p>|</p>
+                        </section>
+                    </header>
+                    <header class="notification-header">
+                    </header>
+                    <section class="ecoms-pageheader">
+                        <img src="/resources/images/shop.svg">
+                    </section>
+                    <section class="container-list-tiles">
+                        <div>
+                            <img src="/image/productcatalog/products/48.jpg">
+                            <h3>BBQ Suitcase</h3>
+                            <img src="/resources/images/rating5.png">
+                            $28.45
+                            <a class="button" href="/product?productId=1">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/22.jpg">
+                            <h3>Babbage Web Spray</h3>
+                            <img src="/resources/images/rating5.png">
+                            $15.05
+                            <a class="button" href="/product?productId=2">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/27.jpg">
+                            <h3>The Trolley-ON</h3>
+                            <img src="/resources/images/rating2.png">
+                            $27.02
+                            <a class="button" href="/product?productId=3">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/26.jpg">
+                            <h3>The Splash</h3>
+                            <img src="/resources/images/rating3.png">
+                            $60.34
+                            <a class="button" href="/product?productId=4">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/6.jpg">
+                            <h3>Com-Tool</h3>
+                            <img src="/resources/images/rating1.png">
+                            $37.19
+                            <a class="button" href="/product?productId=5">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/29.jpg">
+                            <h3>Waterproof Tea Bags</h3>
+                            <img src="/resources/images/rating2.png">
+                            $26.40
+                            <a class="button" href="/product?productId=6">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/56.jpg">
+                            <h3>More Than Just Birdsong</h3>
+                            <img src="/resources/images/rating2.png">
+                            $65.66
+                            <a class="button" href="/product?productId=7">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/66.jpg">
+                            <h3>Paddling Pool Shoes</h3>
+                            <img src="/resources/images/rating1.png">
+                            $23.26
+                            <a class="button" href="/product?productId=8">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/43.jpg">
+                            <h3>First Impression Costumes</h3>
+                            <img src="/resources/images/rating4.png">
+                            $59.51
+                            <a class="button" href="/product?productId=13">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/72.jpg">
+                            <h3>Baby Minding Shoes</h3>
+                            <img src="/resources/images/rating4.png">
+                            $51.19
+                            <a class="button" href="/product?productId=18">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/67.jpg">
+                            <h3>Your Virtual Journey Starts Here</h3>
+                            <img src="/resources/images/rating2.png">
+                            $49.44
+                            <a class="button" href="/product?productId=9">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/41.jpg">
+                            <h3>The Trapster</h3>
+                            <img src="/resources/images/rating4.png">
+                            $98.54
+                            <a class="button" href="/product?productId=14">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/74.jpg">
+                            <h3>Packaway Carport</h3>
+                            <img src="/resources/images/rating3.png">
+                            $39.74
+                            <a class="button" href="/product?productId=19">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/36.jpg">
+                            <h3>Caution Sign</h3>
+                            <img src="/resources/images/rating2.png">
+                            $41.52
+                            <a class="button" href="/product?productId=10">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/8.jpg">
+                            <h3>Folding Gadgets</h3>
+                            <img src="/resources/images/rating2.png">
+                            $80.11
+                            <a class="button" href="/product?productId=15">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/37.jpg">
+                            <h3>The Giant Enter Key</h3>
+                            <img src="/resources/images/rating5.png">
+                            $1.42
+                            <a class="button" href="/product?productId=20">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/52.jpg">
+                            <h3>Hydrated Crackers</h3>
+                            <img src="/resources/images/rating2.png">
+                            $42.01
+                            <a class="button" href="/product?productId=11">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/20.jpg">
+                            <h3>Single Use Food Hider</h3>
+                            <img src="/resources/images/rating2.png">
+                            $57.06
+                            <a class="button" href="/product?productId=16">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/42.jpg">
+                            <h3>Pest Control Umbrella</h3>
+                            <img src="/resources/images/rating5.png">
+                            $53.46
+                            <a class="button" href="/product?productId=12">View details</a>
+                        </div>
+                        <div>
+                            <img src="/image/productcatalog/products/10.jpg">
+                            <h3>Giant Grasshopper</h3>
+                            <img src="/resources/images/rating4.png">
+                            $89.98
+                            <a class="button" href="/product?productId=17">View details</a>
+                        </div>
+                    </section>
+                </div>
+            </section>
+            <div class="footer-wrapper">
+            </div>
+        </div>
+    </body>
+</html>

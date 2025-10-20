@@ -12,10 +12,6 @@ import platform
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Create necessary directories
-Path("command_outputs").mkdir(exist_ok=True)
-Path("scripts").mkdir(exist_ok=True)
-
 # Check if running on Windows
 IS_WINDOWS = platform.system().lower() == 'windows'
 
@@ -53,73 +49,85 @@ class CommandExecutor:
         return True
 
     @staticmethod
-    def run_command(command: str, output_path: str, cwd: str = None) -> bool:
-        """Safely execute a command and capture output."""
+    def execute_command_with_filter_in_wsl(command: str, filter_command: str = None) -> str:
+        """Execute command with optional filter in WSL and return filtered output directly."""
         try:
             if not CommandExecutor.validate_command(command):
-                logger.error(f"Potentially dangerous command blocked: {command}")
-                return False
+                return f"Error: Potentially dangerous command blocked: {command}"
+            
+            # Combine command with filter using pipe if filter provided
+            if filter_command:
+                if not CommandExecutor.validate_command(filter_command):
+                    return f"Error: Potentially dangerous filter command blocked: {filter_command}"
+                full_command = f"{command} | {filter_command}"
+            else:
+                full_command = command
+            
+            # Prepare WSL command
+            wsl_command = f"wsl -u root --cd /tmp -- bash -c \"{full_command}\""
+            
+            # Execute and capture output directly
+            result = subprocess.run(
+                wsl_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5-minute timeout
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                return f"Command error: {result.stderr}"
                 
-            with open(output_path, 'w') as outfile:
-                # Use shell=True on Windows for better compatibility
-                if IS_WINDOWS:
-                    process = subprocess.Popen(
-                        command,
-                        stdout=outfile,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        cwd=cwd,
-                        shell=True  # Required for Windows command execution
-                    )
-                else:
-                    process = subprocess.Popen(
-                        shlex.split(command),
-                        stdout=outfile,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        cwd=cwd
-                    )
-                process.wait(timeout=300)  # 5-minute timeout
-            return True
         except subprocess.TimeoutExpired:
-            logger.error(f"Command timed out: {command}")
-            return False
+            return "Error: Command timed out"
         except Exception as e:
-            logger.error(f"Error executing command {command}: {e}")
-            return False
+            return f"Error executing command in WSL: {e}"
 
     @staticmethod
-    def filter_output(filter_command: str, working_dir: str = None) -> str:
-        """Apply filtering command to output."""
+    def execute_command_with_filter(command: str, filter_command: str = None, cwd: str = None) -> str:
+        """Execute command with optional filter and return filtered output directly."""
         try:
-            # Use shell=True on Windows for better compatibility
+            # Always use WSL for Linux commands when on Windows
             if IS_WINDOWS:
-                result = subprocess.run(
-                    filter_command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    cwd=working_dir,
-                    timeout=60
-                )
+                return CommandExecutor.execute_command_with_filter_in_wsl(command, filter_command)
+            
+            # Native Linux execution
+            if not CommandExecutor.validate_command(command):
+                return f"Error: Potentially dangerous command blocked: {command}"
+            
+            # Combine command with filter using pipe if filter provided
+            if filter_command:
+                if not CommandExecutor.validate_command(filter_command):
+                    return f"Error: Potentially dangerous filter command blocked: {filter_command}"
+                full_command = f"{command} | {filter_command}"
             else:
-                result = subprocess.run(
-                    filter_command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    cwd=working_dir,
-                    timeout=60
-                )
-            return result.stdout if result.returncode == 0 else f"Filter error: {result.stderr}"
+                full_command = command
+            
+            # Execute and capture output directly
+            result = subprocess.run(
+                full_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=300  # 5-minute timeout
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                return f"Command error: {result.stderr}"
+                
         except subprocess.TimeoutExpired:
-            return "Filter command timed out"
+            return "Error: Command timed out"
         except Exception as e:
-            return f"Filter error: {e}"
+            return f"Error executing command: {e}"
 
     @staticmethod
     def run_ai_command(ai_response_json: str) -> str:
-        """Execute a single command from AI JSON response."""
+        """Execute a single command from AI JSON response with integrated filtering."""
         try:
             data = json.loads(ai_response_json)
         except json.JSONDecodeError as e:
@@ -128,7 +136,6 @@ class CommandExecutor:
         # Extract and validate parameters
         reason = data.get("reason", "No reason provided")
         command = data.get("content", "").strip("`")
-        output_name = CommandExecutor.sanitize_filename(data.get("output_name", "output.txt"))
         return_to_ai = data.get("return_to_ai", "")
         should_continue = data.get("continue", True)
 
@@ -136,29 +143,112 @@ class CommandExecutor:
         if not command:
             return "No command to execute."
 
-        # Execute command
-        output_path = f"command_outputs/{output_name}"
-        logger.info(f"Executing: {command} -> {output_path}")
+        # Execute command with filter in one step
+        logger.info(f"Executing: {command}" + (f" | {return_to_ai}" if return_to_ai else ""))
         
-        success = CommandExecutor.run_command(command, output_path)
-        if not success:
-            return f"Error executing command: {command}"
-
-        # Apply filtering if requested
-        filtered_output = ""
-        if return_to_ai:
-            logger.info(f"Filtering output with: {return_to_ai}")
-            filtered_output = CommandExecutor.filter_output(return_to_ai, 'command_outputs')
+        output = CommandExecutor.execute_command_with_filter(command, return_to_ai)
+        
+        if "Error:" in output:
+            return f"Error executing command: {output}"
 
         if not should_continue:
             logger.info("AI indicated the process should stop.")
-            return "Stopping as requested."
+            return f"{output}\nStopping as requested."
 
-        return filtered_output or f"(Raw output saved to {output_name})"
+        return output or "Command executed successfully (no output)"
+
+    @staticmethod
+    def execute_script_in_wsl(script_path: str, script_type: str, filter_command: str = None) -> str:
+        """Execute script in WSL/Kali Linux environment with optional filtering."""
+        try:
+            # Convert Windows path to WSL path
+            wsl_script_path = f"/mnt/{script_path[0].lower()}{script_path[2:].replace(chr(92), '/')}"
+            
+            # Prepare execution command based on script type
+            if script_type == "bash":
+                exec_command = f"bash {wsl_script_path}"
+            elif script_type == "python":
+                exec_command = f"python3 {wsl_script_path}"
+            else:
+                return f"Error: Unsupported script type for WSL: {script_type}"
+            
+            # Combine with filter if provided
+            if filter_command:
+                if not CommandExecutor.validate_command(filter_command):
+                    return f"Error: Potentially dangerous filter command blocked: {filter_command}"
+                full_command = f"{exec_command} | {filter_command}"
+            else:
+                full_command = exec_command
+            
+            # Execute in WSL
+            wsl_command = f"wsl -u root --cd /tmp -- bash -c \"{full_command}\""
+            
+            # Execute and capture output directly
+            result = subprocess.run(
+                wsl_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5-minute timeout
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                return f"Script error: {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            return "Error: Script execution timed out"
+        except Exception as e:
+            return f"Error executing script in WSL: {e}"
+
+    @staticmethod
+    def execute_script(script_path: str, script_type: str, filter_command: str = None, cwd: str = None) -> str:
+        """Execute script with optional filtering and return filtered output directly."""
+        try:
+            # Use WSL for script execution on Windows
+            if IS_WINDOWS:
+                return CommandExecutor.execute_script_in_wsl(script_path, script_type, filter_command)
+            
+            # Native Linux execution
+            if script_type == "python":
+                exec_command = f"python3 {script_path}"
+            elif script_type == "bash":
+                exec_command = f"bash {script_path}"
+            else:
+                return f"Error: Unsupported script type {script_type}"
+            
+            # Combine with filter if provided
+            if filter_command:
+                if not CommandExecutor.validate_command(filter_command):
+                    return f"Error: Potentially dangerous filter command blocked: {filter_command}"
+                full_command = f"{exec_command} | {filter_command}"
+            else:
+                full_command = exec_command
+            
+            # Execute and capture output directly
+            result = subprocess.run(
+                full_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=300  # 5-minute timeout
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                return f"Script error: {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            return "Error: Script execution timed out"
+        except Exception as e:
+            return f"Error executing script: {e}"
 
     @staticmethod
     def run_script(ai_response_json: str) -> str:
-        """Execute a script from AI JSON response."""
+        """Execute a script from AI JSON response with integrated filtering."""
         try:
             data = json.loads(ai_response_json)
         except json.JSONDecodeError as e:
@@ -167,11 +257,14 @@ class CommandExecutor:
         # Extract and validate parameters
         reason = data.get("reason", "No reason provided")
         script_content = data.get("content", "").strip("`")
-        output_name = CommandExecutor.sanitize_filename(data.get("output_name", "output.txt"))
         return_to_ai = data.get("return_to_ai", "")
         should_continue = data.get("continue", True)
         script_name = CommandExecutor.sanitize_filename(data.get("script_name", "ai_script"))
         script_type = data.get("script_type", "").strip().lower()
+
+        # Handle case where type is "bash" directly
+        if data.get("type") == "bash" and not script_type:
+            script_type = "bash"
 
         logger.info(f"Running {script_type} script: {reason}")
 
@@ -184,49 +277,16 @@ class CommandExecutor:
         if not IS_WINDOWS and script_type == "bash":
             os.chmod(script_path, 0o755)
 
-        # Execute script
-        output_path = f"command_outputs/{output_name}"
-        logger.info(f"Executing script: {script_name} -> {output_path}")
+        # Execute script with filter in one step
+        logger.info(f"Executing script: {script_name}" + (f" | {return_to_ai}" if return_to_ai else ""))
         
-        if script_type == "python":
-            cmd = f"python {script_path}" if IS_WINDOWS else f"python3 {script_path}"
-        elif script_type == "bash":
-            if IS_WINDOWS:
-                # On Windows, try to use WSL or Git Bash if available
-                cmd = f"bash {script_path}"
-            else:
-                cmd = f"bash {script_path}"
-        else:
-            return f"Error: Unsupported script type {script_type}"
-
-        success = CommandExecutor.run_command(cmd, output_path, 'scripts')
-        if not success:
-            return f"Error executing script: {script_name}"
-
-        # Apply filtering
-        filtered_output = ""
-        if return_to_ai:
-            logger.info(f"Filtering output with: {return_to_ai}")
-            filtered_output = CommandExecutor.filter_output(return_to_ai, 'command_outputs')
+        output = CommandExecutor.execute_script(script_path, script_type, return_to_ai)
+        
+        if "Error:" in output:
+            return f"Error executing script: {output}"
 
         if not should_continue:
             logger.info("AI indicated the process should stop.")
-            return "Stopping as requested."
+            return f"{output}\nStopping as requested."
 
-        return filtered_output or f"(Raw output saved to {output_name})"
-
-
-# Example usage
-if __name__ == "__main__":
-    ai_response = '''
-    {
-        "type": "command",
-        "content": "ping -c 2 google.com",
-        "reason": "Check connectivity.",
-        "output_name": "ping_google.txt",
-        "return_to_ai": "findstr time=" if platform.system().lower() == 'windows' else "grep 'time=' ping_google.txt",
-        "continue": true
-    }
-    '''
-    result = CommandExecutor.run_ai_command(ai_response)
-    print("\nFiltered Output for AI:\n", result)
+        return output or "Script executed successfully (no output)"

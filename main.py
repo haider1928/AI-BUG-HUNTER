@@ -61,7 +61,7 @@ class PentestAutomation:
             
             if action_type == "command":
                 return self.executor.run_ai_command(cleaned_response)
-            elif action_type == "script" or action_type == "bash_script" or action_type == "python":
+            elif action_type in ["script", "bash", "python"]:
                 return self.executor.run_script(cleaned_response)
             else:
                 logger.error(f"Unknown action type: {action_type}")
@@ -91,7 +91,7 @@ class PentestAutomation:
             logger.info(f"🔁 Iteration {self.iteration}/{self.max_iterations}")
             
             # Random delay to avoid detection
-            sleep_time = random.randint(8, 20)
+            sleep_time = random.randint(1, 5)
             logger.info(f"⏳ Waiting {sleep_time} seconds...")
             sleep(sleep_time)
             

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # CONFIG
 # =======================
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "gemma3:1b"
+OLLAMA_MODEL = "deepseek-v3.1:671b-cloud"
 
 # Generate reference information for the system prompt
 available_refs = knowledge_base_handler.get_reference_keys()
@@ -31,7 +31,7 @@ You can ONLY respond with one command/script per step.
 After executing the command/script, you will be provided the filtered output. 
 Only stop when the target is compromised with a proof. 
 USE SCRIPT FOR REPEATED ACTIONS LIKE SQL UNION ATTACK, ETC.
-
+DONT GIVE SUCH AI COMMANDS WHOSE RESULTS WILL BE SAVED TO FILES
 For each command, respond strictly in JSON format with the fields:
 
 {{
@@ -40,7 +40,7 @@ For each command, respond strictly in JSON format with the fields:
   "script_name": "<script filename if script>",
   "script_type": "<bash or python if script>",
   "reason": "<short explaination>",
-  "output_name": "<filename to save raw output>",
+  "output_name": "<filename to save raw output (this will be used only for scripts)>",
   "return_to_ai": "<command to filter/summarize output before sending back>",
   "vuln": "<the vulnerability you are testing in the target or the phase of attack>",
   "continue": "<true or false>"
@@ -66,7 +66,7 @@ Example for single command:
   "return_to_ai": "grep 'Server' headers.txt",
   "continue": true
 }}
-
+The results of your commands/scripts are in commdand_outputs/<output_name>.
 
 Rules:
 - Only give ONE command/script per step.
