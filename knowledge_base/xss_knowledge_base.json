@@ -1,0 +1,19 @@
+{
+  "xss": {
+    "type": {
+      "reflected": "Reflected XSS occurs when user input is immediately returned in a response",
+      "stored": "Stored XSS occurs when malicious code is stored on the target server",
+      "dom": "DOM-based XSS occurs in the client-side code"
+    },
+    "payloads": {
+      "basic": "<script>alert('XSS')</script>",
+      "bypass": "';alert(String.fromCharCode(88,83,83))//"
+    }
+  },
+  "references": {
+    "xss.type.reflected": "Reflected XSS occurs when user input is immediately returned in a response",
+    "xss.type.stored": "Stored XSS occurs when malicious code is stored on the target server",
+    "xss.type.dom": "DOM-based XSS occurs in the client-side code",
+    "xss.payload.basic": "<script>alert('XSS')</script>"
+  }
+}

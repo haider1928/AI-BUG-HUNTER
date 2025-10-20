@@ -1,10 +1,12 @@
 import os
 import json
 import logging
-import google.generativeai as genai
+import requests
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import re
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from knowledge_base_handler import knowledge_base_handler
 
 # Configure logging
@@ -14,21 +16,17 @@ logger = logging.getLogger(__name__)
 # =======================
 # CONFIG
 # =======================
-API_KEY = os.getenv("GENAI_API_KEY")  # Always use environment variables for secrets
-if not API_KEY:
-    logger.error("GENAI_API_KEY environment variable not set")
-    exit(1)
-
-genai.configure(api_key=API_KEY)
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "gemma3:1b"
 
 # Generate reference information for the system prompt
-available_refs = knowledge_base_handler.get_available_references()
-refs_text = "\n".join([f"- {ref}: {desc}" for ref, desc in available_refs.items()])
+available_refs = knowledge_base_handler.get_reference_keys()
+refs_text = "\n".join([f"- {ref}" for ref in available_refs])
 
-SYSTEM_PROMPT = f"""
+
+SYSTEM_PROMPT = """
 You are a highly skilled cybersecurity assistant specialized in pentesting and bug hunting. 
-You have access to a comprehensive XSS knowledge base that you can reference using the knowledge_ref field.
-
+type field MUST be exactly one of: "command" or "script" 
 You can ONLY respond with one command/script per step. 
 After executing the command/script, you will be provided the filtered output. 
 Only stop when the target is compromised with a proof. 
@@ -41,13 +39,34 @@ For each command, respond strictly in JSON format with the fields:
   "content": "<command or script code>",
   "script_name": "<script filename if script>",
   "script_type": "<bash or python if script>",
-  "reason": "<short explanation>",
+  "reason": "<short explaination>",
   "output_name": "<filename to save raw output>",
   "return_to_ai": "<command to filter/summarize output before sending back>",
   "vuln": "<the vulnerability you are testing in the target or the phase of attack>",
-  "knowledge_ref": "<reference to knowledge base section (e.g., xss.type.reflected)>",
   "continue": "<true or false>"
 }}
+Example for bash script:
+{{
+  "type": "script",
+  "script_type": "bash",
+  "content": "echo 'Hello World'",
+  "script_name": "hello.sh",
+  "reason": "Testing bash execution",
+  "output_name": "hello_output.txt",
+  "return_to_ai": "cat hello_output.txt",
+  "continue": true
+}}
+
+Example for single command:
+{{
+  "type": "command",
+  "content": "curl -I https://example.com",
+  "reason": "Checking HTTP headers",
+  "output_name": "headers.txt",
+  "return_to_ai": "grep 'Server' headers.txt",
+  "continue": true
+}}
+
 
 Rules:
 - Only give ONE command/script per step.
@@ -56,11 +75,6 @@ Rules:
 - return_to_ai should be a command that processes the saved file and extracts only useful info.
 - Always include #!/bin/bash at the top of bash scripts.
 - Never give None output.
-- Use the knowledge_ref field to reference specific knowledge from the XSS knowledge base.
-
-Available knowledge base references:
-{refs_text}
-
 Treat the environment as a live pentesting lab.
 """
 
@@ -69,64 +83,218 @@ Treat the environment as a live pentesting lab.
 # =======================
 class AICyberSecurityAssistant:
     def __init__(self):
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            system_instruction=SYSTEM_PROMPT
-        )
-        self.conversation = self.model.start_chat(history=[])
+        self.model_name = OLLAMA_MODEL
+        self.base_url = OLLAMA_BASE_URL.rstrip('/')
+        self.conversation_history: List[Dict[str, str]] = []
         self.history_file = "conversation_history.json"
         self.load_history()
+        logger.info(f"Ollama assistant initialized with model: {self.model_name}")
 
     def load_history(self):
         """Load conversation history from file if exists."""
         try:
             if os.path.exists(self.history_file):
                 with open(self.history_file, 'r') as f:
-                    history_data = json.load(f)
-                    # Reconstruct conversation history
-                    for msg in history_data:
-                        if msg['role'] == 'user':
-                            self.conversation.history.append(
-                                genai.types.Content(role="user", parts=[genai.types.Part(text=msg['content'])])
-                            )
-                        else:
-                            self.conversation.history.append(
-                                genai.types.Content(role="model", parts=[genai.types.Part(text=msg['content'])])
-                            )
+                    data = json.load(f)
+                    self.conversation_history = data.get('history', [])
+                logger.info(f"Loaded {len(self.conversation_history)} messages from memory")
         except Exception as e:
             logger.warning(f"Could not load conversation history: {e}")
 
     def save_history(self):
         """Save conversation history to file."""
         try:
-            history_data = []
-            for msg in self.conversation.history:
-                history_data.append({
-                    'role': msg.role,
-                    'content': msg.parts[0].text if msg.parts else '',
-                    'timestamp': datetime.now().isoformat()
-                })
-            
+            data = {
+                'history': self.conversation_history,
+                'model': self.model_name,
+                'timestamp': datetime.now().isoformat()
+            }
             with open(self.history_file, 'w') as f:
-                json.dump(history_data, f, indent=2)
+                json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"Could not save conversation history: {e}")
+    
+    
+    def validate_response(self, response: str) -> bool:
+        """
+        Validate AI response is proper JSON with required structure.
+        
+        Args:
+            response (str): AI response to validate
+            
+        Returns:
+            bool: True if valid JSON with correct structure, False otherwise
+        """
+        if not isinstance(response, str):
+            logger.error("AI response must be a string")
+            return False
+        
+        if not response or not response.strip():
+            logger.error("AI response is empty")
+            return False
+        
+        try:
+            # Clean response first (remove markdown code blocks)
+            cleaned = self.clean_ai_response(response)
+            
+            if not cleaned:
+                logger.error("AI response is empty after cleaning")
+                return False
+                
+            # Parse JSON
+            parsed = json.loads(cleaned)
+            
+            # Strict checks
+            if parsed is None:
+                logger.error("AI response is null")
+                return False
+                
+            if not isinstance(parsed, dict):
+                logger.error("AI response must be a JSON object")
+                return False
+                
+            # Check required fields for AI command structure
+            required_fields = ["type", "content", "reason", "continue"]
+            for field in required_fields:
+                if field not in parsed:
+                    logger.error(f"Missing required field: {field}")
+                    return False
+                    
+            # Validate type field
+            if parsed["type"] not in ["command", "script", "bash", "python"]:
+                logger.error(f"Invalid type field: {parsed['type']}")
+                return False
+                
+            # Validate script-specific fields if type is script
+            if parsed["type"] == "script":
+                if "script_type" not in parsed or parsed["script_type"] not in ["bash", "python"]:
+                    logger.error("Script type missing or invalid")
+                    return False
+                if "script_name" not in parsed:
+                    logger.error("Script name missing for script type")
+                    return False
+                    
+            # Validate continue field is boolean
+            if not isinstance(parsed["continue"], bool):
+                logger.error("Continue field must be boolean")
+                return False
+                
+            # Validate content field is string
+            if not isinstance(parsed["content"], str):
+                logger.error("Content field must be string")
+                return False
+                
+            # Validate reason field is string
+            if not isinstance(parsed["reason"], str):
+                logger.error("Reason field must be string")
+                return False
+                
+            return True
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"AI response is not valid JSON: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error validating AI response: {e}")
+            return False
+        
+        
+        
+    def add_to_history(self, role: str, content: str) -> None:
+        """
+        Add a message to conversation history
+        
+        Args:
+            role (str): Either 'user' or 'assistant'
+            content (str): Message content
+        """
+        self.conversation_history.append({
+            'role': role,
+            'content': content,
+            'timestamp': datetime.now().isoformat()
+        })
+        self.save_history()
+
+    def get_context(self, limit: Optional[int] = None) -> List[Dict[str, str]]:
+        """
+        Get conversation context (recent messages)
+        
+        Args:
+            limit (int, optional): Number of recent messages to return
+            
+        Returns:
+            List of message dictionaries
+        """
+        if limit:
+            return self.conversation_history[-limit:]
+        return self.conversation_history
+
+    def build_full_prompt(self, prompt: str) -> str:
+        """
+        Build full prompt with system instruction and conversation history
+        
+        Args:
+            prompt (str): Current user prompt
+            
+        Returns:
+            str: Full formatted prompt
+        """
+        # Prepare the full prompt with context
+        context_messages = self.get_context(20)  # Last 20 messages for context
+        
+        # Build context string
+        context_text = ""
+        for msg in context_messages:
+            if msg['role'] == 'user':
+                context_text += f"Human: {msg['content']}\n"
+            elif msg['role'] == 'assistant':
+                context_text += f"Assistant: {msg['content']}\n"
+        
+        # Add current prompt
+        full_prompt = f"{context_text}Human: {prompt}\nAssistant:"
+        
+        # Add system prompt at the beginning
+        return f"{SYSTEM_PROMPT}\n\n{full_prompt}"
 
     def chat(self, prompt: str) -> Optional[str]:
-        """Send message to AI and get response."""
+        """Send message to Ollama and get response."""
         try:
-            response = self.conversation.send_message(
-                prompt,
-                generation_config={
-                    "max_output_tokens": 1500,
-                    "temperature": 0.7
-                }
-            )
+            # Add user message to history
+            self.add_to_history('user', prompt)
             
-            if response.candidates and response.candidates[0].content.parts:
-                result = response.candidates[0].content.parts[0].text.strip()
-                self.save_history()
-                return result
+            # Build full prompt with context
+            full_prompt = self.build_full_prompt(prompt)
+            
+            # Prepare API request
+            url = f"{self.base_url}/api/generate"
+            payload = {
+                'model': self.model_name,
+                'prompt': full_prompt,
+                'stream': False,
+                'options': {
+                    'temperature': 0.7,
+                    'num_predict': 1500
+                }
+            }
+            
+            # Make API call
+            response = requests.post(url, json=payload, timeout=300)
+            response.raise_for_status()
+            
+            # Parse response
+            result = response.json()
+            assistant_response = result.get('response', '').strip()
+            
+            # Add assistant response to history
+            if assistant_response:
+                self.add_to_history('assistant', assistant_response)
+            
+            return assistant_response
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API request failed: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
             return None
         except Exception as e:
             logger.error(f"Error in chat(): {e}")

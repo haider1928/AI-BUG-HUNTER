@@ -44,5 +44,6 @@ class KnowledgeHandler:
         return results
 
 # Example usage
-handler = KnowledgeHandler()
-print(handler.search_knowledge("reflected"))
+knowledge_base_handler = KnowledgeHandler()
+if __name__ == "__main__":
+    print(knowledge_base_handler.search_knowledge("reflected"))

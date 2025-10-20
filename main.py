@@ -1,4 +1,4 @@
-from brain.ai import ai_assistant, AICyberSecurityAssistant
+from brain.ai import ai_assistant  # Import the instance, not the class
 from command_executer import CommandExecutor
 from time import sleep
 import random
@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 class PentestAutomation:
     def __init__(self):
         self.executor = CommandExecutor()
-        self.ai = ai_assistant
-        self.context = ""
+        self.ai = ai_assistant  # Use the pre-configured instance
+        self.context = ""  # Initialize as empty string
         self.iteration = 0
-        self.max_iterations = 50  # Safety limit
+        self.max_iterations = 100  # Safety limit
 
     def get_target_info(self) -> bool:
         """Get target information from user."""
@@ -47,7 +47,7 @@ class PentestAutomation:
     def execute_ai_command(self, ai_response: str) -> Optional[str]:
         """Execute AI command and return output."""
         try:
-            cleaned_response = AICyberSecurityAssistant.clean_ai_response(ai_response)
+            cleaned_response = self.ai.clean_ai_response(ai_response)  # Use self.ai
             
             if not self.ai.validate_response(cleaned_response):
                 logger.error("AI response validation failed")
@@ -61,7 +61,7 @@ class PentestAutomation:
             
             if action_type == "command":
                 return self.executor.run_ai_command(cleaned_response)
-            elif action_type == "script":
+            elif action_type == "script" or action_type == "bash_script" or action_type == "python":
                 return self.executor.run_script(cleaned_response)
             else:
                 logger.error(f"Unknown action type: {action_type}")
@@ -78,6 +78,14 @@ class PentestAutomation:
             
         logger.info("🚀 Starting automated penetration testing")
         
+        # Initialize conversation with AI
+        initial_prompt = f"Let's start pentesting. {self.context}"
+        ai_response = self.ai.chat(initial_prompt)
+        
+        if not ai_response:
+            logger.error("Failed to initialize AI conversation")
+            return
+            
         while self.iteration < self.max_iterations:
             self.iteration += 1
             logger.info(f"🔁 Iteration {self.iteration}/{self.max_iterations}")
@@ -103,7 +111,7 @@ class PentestAutomation:
             
             # Check if we should continue
             try:
-                cleaned = AICyberSecurityAssistant.clean_ai_response(ai_response)
+                cleaned = self.ai.clean_ai_response(ai_response)  # Use self.ai
                 data = json.loads(cleaned)
                 if not data.get("continue", True):
                     logger.info("🛑 AI indicated the process should stop")
@@ -115,7 +123,7 @@ class PentestAutomation:
             self.context = f"{self.context}\nLast command output: {output}"
             
             # Safety check - don't let context grow too large
-            if len(self.context) > 4000:       # we are gonna apply ai filter soon or somethign
+            if len(self.context) > 4000:
                 self.context = self.context[-4000:]
                 
         logger.info(f"🏁 Pentest automation completed after {self.iteration} iterations")

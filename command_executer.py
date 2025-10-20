@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 import re
+import platform
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 Path("command_outputs").mkdir(exist_ok=True)
 Path("scripts").mkdir(exist_ok=True)
 
+# Check if running on Windows
+IS_WINDOWS = platform.system().lower() == 'windows'
 
 class CommandExecutor:
     """Safe command and script execution with proper sanitization and error handling."""
@@ -37,6 +40,13 @@ class CommandExecutor:
             r'>/dev/sd', r'mount\s+', r'umount\s+'
         ]
         
+        # Windows specific dangerous commands
+        if IS_WINDOWS:
+            dangerous_patterns.extend([
+                r'del\s+/s\s+/q', r'rmdir\s+/s\s+/q', r'format\s+', 
+                r'diskpart', r'reg\s+delete', r'taskkill\s+/f'
+            ])
+        
         for pattern in dangerous_patterns:
             if re.search(pattern, command, re.IGNORECASE):
                 return False
@@ -51,13 +61,24 @@ class CommandExecutor:
                 return False
                 
             with open(output_path, 'w') as outfile:
-                process = subprocess.Popen(
-                    shlex.split(command),
-                    stdout=outfile,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=cwd
-                )
+                # Use shell=True on Windows for better compatibility
+                if IS_WINDOWS:
+                    process = subprocess.Popen(
+                        command,
+                        stdout=outfile,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        cwd=cwd,
+                        shell=True  # Required for Windows command execution
+                    )
+                else:
+                    process = subprocess.Popen(
+                        shlex.split(command),
+                        stdout=outfile,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        cwd=cwd
+                    )
                 process.wait(timeout=300)  # 5-minute timeout
             return True
         except subprocess.TimeoutExpired:
@@ -71,14 +92,25 @@ class CommandExecutor:
     def filter_output(filter_command: str, working_dir: str = None) -> str:
         """Apply filtering command to output."""
         try:
-            result = subprocess.run(
-                filter_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=working_dir,
-                timeout=60
-            )
+            # Use shell=True on Windows for better compatibility
+            if IS_WINDOWS:
+                result = subprocess.run(
+                    filter_command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=working_dir,
+                    timeout=60
+                )
+            else:
+                result = subprocess.run(
+                    filter_command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=working_dir,
+                    timeout=60
+                )
             return result.stdout if result.returncode == 0 else f"Filter error: {result.stderr}"
         except subprocess.TimeoutExpired:
             return "Filter command timed out"
@@ -148,8 +180,8 @@ class CommandExecutor:
         with open(script_path, "w") as script_file:
             script_file.write(script_content)
 
-        # Make executable if bash script
-        if script_type == "bash":
+        # Make executable if bash script (Unix only)
+        if not IS_WINDOWS and script_type == "bash":
             os.chmod(script_path, 0o755)
 
         # Execute script
@@ -157,9 +189,13 @@ class CommandExecutor:
         logger.info(f"Executing script: {script_name} -> {output_path}")
         
         if script_type == "python":
-            cmd = f"python3 {script_path}"
+            cmd = f"python {script_path}" if IS_WINDOWS else f"python3 {script_path}"
         elif script_type == "bash":
-            cmd = f"bash {script_path}"
+            if IS_WINDOWS:
+                # On Windows, try to use WSL or Git Bash if available
+                cmd = f"bash {script_path}"
+            else:
+                cmd = f"bash {script_path}"
         else:
             return f"Error: Unsupported script type {script_type}"
 
@@ -188,7 +224,7 @@ if __name__ == "__main__":
         "content": "ping -c 2 google.com",
         "reason": "Check connectivity.",
         "output_name": "ping_google.txt",
-        "return_to_ai": "grep 'time=' ping_google.txt",
+        "return_to_ai": "findstr time=" if platform.system().lower() == 'windows' else "grep 'time=' ping_google.txt",
         "continue": true
     }
     '''
