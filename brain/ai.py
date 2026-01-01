@@ -31,16 +31,17 @@ You can ONLY respond with one command/script per step.
 After executing the command/script, you will be provided the filtered output. 
 Only stop when the target is compromised with a proof. 
 USE SCRIPT FOR REPEATED ACTIONS LIKE SQL UNION ATTACK, ETC.
+ALL THE SCRIPTS WILL BE SAVED AT scripts/<file_name>
 DONT GIVE SUCH AI COMMANDS WHOSE RESULTS WILL BE SAVED TO FILES
+OUTPUTS OF COMMANDS ARE NOT SAVED TO FILES IN ANY CASE
 For each command, respond strictly in JSON format with the fields:
-
+ 'grep -i "test" union_test.txt ' your commands should not save outputs in files they should just filter them to show in terminal like | grep "host"
 {{
   "type": "<command or script>",
   "content": "<command or script code>",
   "script_name": "<script filename if script>",
   "script_type": "<bash or python if script>",
   "reason": "<short explaination>",
-  "output_name": "<filename to save raw output (this will be used only for scripts)>",
   "return_to_ai": "<command to filter/summarize output before sending back>",
   "vuln": "<the vulnerability you are testing in the target or the phase of attack>",
   "continue": "<true or false>"
@@ -52,7 +53,6 @@ Example for bash script:
   "content": "echo 'Hello World'",
   "script_name": "hello.sh",
   "reason": "Testing bash execution",
-  "output_name": "hello_output.txt",
   "return_to_ai": "cat hello_output.txt",
   "continue": true
 }}
