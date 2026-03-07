@@ -64,15 +64,9 @@ class PentestAutomation:
             
             output = None
             if action_type == "command":
-<<<<<<< Updated upstream
-                return self.executor.run_ai_command(cleaned_response)
-            elif action_type == "script":
-                return self.executor.run_script(cleaned_response)
-=======
                 output = self.executor.run_ai_command(cleaned_response)
             elif action_type in ["script", "bash", "python"]:
                 output = self.executor.run_script(cleaned_response)
->>>>>>> Stashed changes
             else:
                 logger.error(f"Unknown action type: {action_type}")
                 return f"Error: Unknown action type '{action_type}'. Valid types are 'command', 'script', 'bash', 'python'."
@@ -93,24 +87,13 @@ class PentestAutomation:
             
         logger.info("🚀 Starting automated penetration testing")
         
-<<<<<<< Updated upstream
-=======
         # Initialize conversation with AI
         prompt = f"Let's start pentesting. {self.context}"
         
->>>>>>> Stashed changes
         while self.iteration < self.max_iterations:
             self.iteration += 1
             logger.info(f"🔁 Iteration {self.iteration}/{self.max_iterations}")
             
-<<<<<<< Updated upstream
-            # Random delay to avoid detection
-            sleep_time = random.randint(8, 20)
-            logger.info(f"⏳ Waiting {sleep_time} seconds...")
-            sleep(sleep_time)
-            
-=======
->>>>>>> Stashed changes
             # Get AI response
             logger.info("🤖 Analyzing context and waiting for AI response...")
             ai_response = self.ai.chat(prompt)
