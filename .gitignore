@@ -1,54 +1,42 @@
-.gitignore
+# Local environment and secrets
+.env
+conversation_history.json
 googleai.key
-_shit.py
 api.key
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Dependency directories
-node_modules/
-bower_components/
-
-# Build directories
-dist/
-build/
-out/
-target/
-
-# Python
+# Python artifacts
 __pycache__/
 *.py[cod]
 *.egg
 *.egg-info/
 .eggs/
-.env
-.venv
+.venv/
 env/
 venv/
 
-# IDEs / Editors
+# Logs and command output
+*.log
+pentest_automation.log
+command_outputs/
+scripts/
+
+# Editor and OS files
 .vscode/
 .idea/
 *.swp
 *.swo
+.DS_Store
+Thumbs.db
 
-# Coverage / Test
-.coverage
+# Build and tooling
+dist/
+build/
+out/
+target/
+coverage/
+.pytest_cache/
 .tox/
 .nox/
-.pytest_cache/
-coverage/
-
-# Misc
 *.bak
 *.tmp
 *.cache

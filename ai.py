@@ -1,9 +1,9 @@
 import os
 import json
 import logging
-import google.generativeai as genai
+import warnings
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 import re
 from knowledge_base_handler import knowledge_base_handler
 
@@ -11,17 +11,24 @@ from knowledge_base_handler import knowledge_base_handler
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# =======================
-# CONFIG
-# =======================
-API_KEY = os.getenv("GENAI_API_KEY")  # Always use environment variables for secrets
-if not API_KEY:
-    logger.error("GENAI_API_KEY environment variable not set")
-    exit(1)
+try:
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FutureWarning)
+        import google.generativeai as genai
+except ImportError:
+    genai = None
+    logger.warning('google.generativeai is not installed, using offline fallback mode.')
 
-genai.configure(api_key=API_KEY)
+API_KEY = os.getenv("GENAI_API_KEY")
+USE_OFFLINE_FALLBACK = genai is None or not API_KEY
 
-# Generate reference information for the system prompt
+if genai and API_KEY:
+    try:
+        genai.configure(api_key=API_KEY)
+    except Exception as exc:
+        logger.warning(f"Could not configure Google Generative AI client: {exc}")
+        USE_OFFLINE_FALLBACK = True
+
 available_refs = knowledge_base_handler.get_available_references()
 refs_text = "\n".join([f"- {ref}: {desc}" for ref, desc in available_refs.items()])
 
@@ -64,34 +71,40 @@ Available knowledge base references:
 Treat the environment as a live pentesting lab.
 """
 
-# =======================
-# MODEL INIT
-# =======================
 class AICyberSecurityAssistant:
     def __init__(self):
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            system_instruction=SYSTEM_PROMPT
-        )
-        self.conversation = self.model.start_chat(history=[])
         self.history_file = "conversation_history.json"
+        self.history = []
+        self.running_offline = USE_OFFLINE_FALLBACK
+
+        if not self.running_offline:
+            self.model = genai.GenerativeModel(
+                model_name="gemini-2.5-flash",
+                system_instruction=SYSTEM_PROMPT
+            )
+            self.conversation = self.model.start_chat(history=[])
+        else:
+            self.model = None
+            self.conversation = None
+
         self.load_history()
 
     def load_history(self):
-        """Load conversation history from file if exists."""
+        """Load conversation history from file if it exists."""
+        self.history = []
+        if not os.path.exists(self.history_file):
+            return
+
         try:
-            if os.path.exists(self.history_file):
-                with open(self.history_file, 'r') as f:
-                    history_data = json.load(f)
-                    # Reconstruct conversation history
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+                self.history = history_data
+
+                if self.conversation is not None:
                     for msg in history_data:
-                        if msg['role'] == 'user':
+                        if msg['role'] in ('user', 'model'):
                             self.conversation.history.append(
-                                genai.types.Content(role="user", parts=[genai.types.Part(text=msg['content'])])
-                            )
-                        else:
-                            self.conversation.history.append(
-                                genai.types.Content(role="model", parts=[genai.types.Part(text=msg['content'])])
+                                genai.types.Content(role=msg['role'], parts=[genai.types.Part(text=msg['content'])])
                             )
         except Exception as e:
             logger.warning(f"Could not load conversation history: {e}")
@@ -100,29 +113,39 @@ class AICyberSecurityAssistant:
         """Save conversation history to file."""
         try:
             history_data = []
-            for msg in self.conversation.history:
-                history_data.append({
-                    'role': msg.role,
-                    'content': msg.parts[0].text if msg.parts else '',
-                    'timestamp': datetime.now().isoformat()
-                })
-            
-            with open(self.history_file, 'w') as f:
+            if self.conversation is not None:
+                for msg in self.conversation.history:
+                    history_data.append({
+                        'role': msg.role,
+                        'content': msg.parts[0].text if msg.parts else '',
+                        'timestamp': datetime.now().isoformat()
+                    })
+            else:
+                history_data = self.history
+
+            with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(history_data, f, indent=2)
         except Exception as e:
             logger.error(f"Could not save conversation history: {e}")
 
     def chat(self, prompt: str) -> Optional[str]:
         """Send message to AI and get response."""
+        if self.running_offline:
+            response = self.offline_response(prompt)
+            self.history.append({'role': 'user', 'content': prompt, 'timestamp': datetime.now().isoformat()})
+            self.history.append({'role': 'model', 'content': response, 'timestamp': datetime.now().isoformat()})
+            self.save_history()
+            return response
+
         try:
             response = self.conversation.send_message(
                 prompt,
                 generation_config={
-                    "max_output_tokens": 1500,
-                    "temperature": 0.7
+                    'max_output_tokens': 1500,
+                    'temperature': 0.7
                 }
             )
-            
+
             if response.candidates and response.candidates[0].content.parts:
                 result = response.candidates[0].content.parts[0].text.strip()
                 self.save_history()
@@ -132,45 +155,51 @@ class AICyberSecurityAssistant:
             logger.error(f"Error in chat(): {e}")
             return None
 
+    def offline_response(self, prompt: str) -> str:
+        """Return a fixed AI-like response when no API is available."""
+        response = {
+            'type': 'command',
+            'content': 'python -c "print(\'offline AI response\')"',
+            'reason': 'Offline fallback response for testing the command execution flow.',
+            'output_name': 'offline_output.txt',
+            'return_to_ai': 'python -c "print(open(\'offline_output.txt\').read())"',
+            'vuln': 'offline-test',
+            'continue': False
+        }
+        return json.dumps(response)
+
     def validate_response(self, response: str) -> bool:
         """Validate AI response is proper JSON with required fields."""
         try:
-            # Clean response first
             cleaned = self.clean_ai_response(response)
             data = json.loads(cleaned)
-            
-            # Check required fields
-            required = ["type", "content", "reason", "continue"]
+
+            required = ['type', 'content', 'reason', 'continue']
             for field in required:
                 if field not in data:
                     logger.error(f"Missing required field: {field}")
                     return False
-                    
-            # Validate type
-            if data["type"] not in ["command", "script"]:
+
+            if data['type'] not in ['command', 'script']:
                 logger.error(f"Invalid type: {data['type']}")
                 return False
-                
-            # Validate script fields if type is script
-            if data["type"] == "script":
-                if "script_type" not in data or data["script_type"] not in ["bash", "python"]:
-                    logger.error("Script type missing or invalid")
+
+            if data['type'] == 'script':
+                if data.get('script_type') not in ['bash', 'python']:
+                    logger.error('Script type missing or invalid')
                     return False
-                if "script_name" not in data:
-                    logger.error("Script name missing for script type")
+                if 'script_name' not in data:
+                    logger.error('Script name missing for script type')
                     return False
-                    
-            # Validate knowledge_ref if provided
-            if "knowledge_ref" in data and data["knowledge_ref"]:
-                knowledge = knowledge_base_handler.get_knowledge(data["knowledge_ref"])
-                if not knowledge:
+
+            if data.get('knowledge_ref'):
+                knowledge = knowledge_base_handler.get_knowledge(data['knowledge_ref'])
+                if knowledge == 'Reference not found':
                     logger.warning(f"Invalid knowledge reference: {data['knowledge_ref']}")
-                    # Don't fail validation for invalid knowledge ref, just warn
-                    
+
             return True
-            
         except json.JSONDecodeError:
-            logger.error("AI response is not valid JSON")
+            logger.error('AI response is not valid JSON')
             return False
         except Exception as e:
             logger.error(f"Error validating AI response: {e}")
@@ -180,46 +209,35 @@ class AICyberSecurityAssistant:
     def clean_ai_response(raw: str) -> str:
         """Clean AI response by removing code block markers."""
         if not raw:
-            return ""
-        return re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+            return ''
+        return re.sub(r'^```(?:json)?|```$', '', raw.strip(), flags=re.MULTILINE).strip()
 
 
-# Global instance
 ai_assistant = AICyberSecurityAssistant()
 
-# =======================
-# TESTING MODE
-# =======================
-if __name__ == "__main__":
-    print("CyberSec AI Chat (type 'exit' to quit)")
-    ai_assistant.chat("Hello, I am ready to start. The target is an internal network.")
-
+if __name__ == '__main__':
+    print('CyberSec AI Chat (type "exit" to quit)')
     while True:
-        user_input = input("You: ")
-        if user_input.lower() in ["exit", "quit"]:
-            print("Exiting CyberSec AI Chat.")
+        user_input = input('You: ')
+        if user_input.lower() in ['exit', 'quit']:
+            print('Exiting CyberSec AI Chat.')
             break
-            
+
         response = ai_assistant.chat(user_input)
         if response:
-            print("AI:", response)
-            
-            # Validate the response
+            print('AI:', response)
             if ai_assistant.validate_response(response):
-                print("✓ Response is valid")
-                
-                # Extract knowledge reference if present
+                print('✓ Response is valid')
                 try:
                     cleaned = ai_assistant.clean_ai_response(response)
                     data = json.loads(cleaned)
-                    if "knowledge_ref" in data and data["knowledge_ref"]:
-                        knowledge = knowledge_base_handler.get_knowledge(data["knowledge_ref"])
+                    if data.get('knowledge_ref'):
+                        knowledge = knowledge_base_handler.get_knowledge(data['knowledge_ref'])
                         if knowledge:
-                            print(f"📚 Knowledge reference: {data['knowledge_ref']}")
-                            # You could log or display the knowledge here
-                except:
-                    pass  # Don't break if we can't parse the knowledge ref
+                            print(f"Knowledge reference: {data['knowledge_ref']}")
+                except Exception:
+                    pass
             else:
-                print("✗ Response validation failed")
+                print('✗ Response validation failed')
         else:
-            print("No response from AI.")
+            print('No response from AI.')

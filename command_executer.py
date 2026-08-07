@@ -180,17 +180,14 @@ class CommandExecutor:
         return filtered_output or f"(Raw output saved to {output_name})"
 
 
-# Example usage
 if __name__ == "__main__":
-    ai_response = '''
-    {
+    ai_response = json.dumps({
         "type": "command",
-        "content": "ping -c 2 google.com",
+        "content": "python -c \"print('ping simulation')\"",
         "reason": "Check connectivity.",
         "output_name": "ping_google.txt",
-        "return_to_ai": "grep 'time=' ping_google.txt",
-        "continue": true
-    }
-    '''
+        "return_to_ai": "python -c \"print(open('ping_google.txt').read())\"",
+        "continue": True
+    })
     result = CommandExecutor.run_ai_command(ai_response)
     print("\nFiltered Output for AI:\n", result)
