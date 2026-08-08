@@ -1,10 +1,10 @@
 import json
 import subprocess
-import shlex
+import sys
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Optional
 import re
 
 # Configure logging
@@ -49,16 +49,23 @@ class CommandExecutor:
             if not CommandExecutor.validate_command(command):
                 logger.error(f"Potentially dangerous command blocked: {command}")
                 return False
-                
-            with open(output_path, 'w') as outfile:
-                process = subprocess.Popen(
-                    shlex.split(command),
+
+            output_file_path = Path(output_path)
+            output_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with output_file_path.open('w', encoding='utf-8') as outfile:
+                result = subprocess.run(
+                    command,
+                    shell=True,
                     stdout=outfile,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    cwd=cwd
+                    cwd=cwd,
+                    timeout=300
                 )
-                process.wait(timeout=300)  # 5-minute timeout
+            if result.returncode != 0:
+                logger.error(f"Command failed with return code {result.returncode}: {command}")
+                return False
             return True
         except subprocess.TimeoutExpired:
             logger.error(f"Command timed out: {command}")
@@ -105,12 +112,13 @@ class CommandExecutor:
             return "No command to execute."
 
         # Execute command
-        output_path = f"command_outputs/{output_name}"
+        output_path = Path("command_outputs") / output_name
         logger.info(f"Executing: {command} -> {output_path}")
         
-        success = CommandExecutor.run_command(command, output_path)
+        success = CommandExecutor.run_command(command, str(output_path))
         if not success:
-            return f"Error executing command: {command}"
+            logger.error(f"Error executing command: {command}")
+            return None
 
         # Apply filtering if requested
         filtered_output = ""
@@ -144,28 +152,31 @@ class CommandExecutor:
         logger.info(f"Running {script_type} script: {reason}")
 
         # Save script to file
-        script_path = f"scripts/{script_name}"
-        with open(script_path, "w") as script_file:
-            script_file.write(script_content)
+        script_path = Path("scripts") / script_name
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(script_content, encoding='utf-8')
 
         # Make executable if bash script
         if script_type == "bash":
             os.chmod(script_path, 0o755)
 
         # Execute script
-        output_path = f"command_outputs/{output_name}"
+        output_path = Path("command_outputs") / output_name
         logger.info(f"Executing script: {script_name} -> {output_path}")
-        
-        if script_type == "python":
-            cmd = f"python3 {script_path}"
-        elif script_type == "bash":
-            cmd = f"bash {script_path}"
-        else:
-            return f"Error: Unsupported script type {script_type}"
 
-        success = CommandExecutor.run_command(cmd, output_path, 'scripts')
+        if script_type == "python":
+            interpreter = sys.executable or "python"
+            cmd = f"{interpreter} {script_path.name}"
+        elif script_type == "bash":
+            cmd = f"bash {script_path.name}"
+        else:
+            logger.error(f"Unsupported script type {script_type}")
+            return None
+
+        success = CommandExecutor.run_command(cmd, str(output_path), str(script_path.parent))
         if not success:
-            return f"Error executing script: {script_name}"
+            logger.error(f"Error executing script: {script_name}")
+            return None
 
         # Apply filtering
         filtered_output = ""

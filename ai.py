@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import logging
 import warnings
@@ -156,10 +157,37 @@ class AICyberSecurityAssistant:
             return None
 
     def offline_response(self, prompt: str) -> str:
-        """Return a fixed AI-like response when no API is available."""
+        """Return a simple offline AI-like response when no API is available."""
+        # Try to extract a target URL from prompt context for a real offline action.
+        url_match = re.search(r"(https?://[\w\-\.\:/?&=%#]+)", prompt)
+        if url_match:
+            target_url = url_match.group(1)
+            python_exec = sys.executable.replace('\\', '\\\\') if sys.executable else 'python'
+            command = (
+                f'{python_exec} -c "import urllib.request, sys; '
+                f'url=\'{target_url}\'; '
+                'req=urllib.request.Request(url, headers={\'User-Agent\': \'Mozilla/5.0\'}); '
+                'r=urllib.request.urlopen(req, timeout=15); '
+                'data=r.read(10000).decode(\'utf-8\', errors=\'replace\'); '
+                'print(\'URL:\', url); '
+                'print(\'STATUS:\', r.status); '
+                'print(\'CONTENT-TYPE:\', r.getheader(\'content-type\')); '
+                'print(data)"'
+            )
+            response = {
+                'type': 'command',
+                'content': command,
+                'reason': 'Fetch the target URL for offline reconnaissance and inspect the response.',
+                'output_name': 'offline_recon_output.txt',
+                'return_to_ai': 'python -c "print(open(\'offline_recon_output.txt\').read())"',
+                'vuln': 'recon',
+                'continue': False
+            }
+            return json.dumps(response)
+
         response = {
             'type': 'command',
-            'content': 'python -c "print(\'offline AI response\')"',
+            'content': f'{sys.executable} -c "print(\'offline AI response\')"',
             'reason': 'Offline fallback response for testing the command execution flow.',
             'output_name': 'offline_output.txt',
             'return_to_ai': 'python -c "print(open(\'offline_output.txt\').read())"',
