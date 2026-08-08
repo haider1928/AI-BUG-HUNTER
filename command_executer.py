@@ -17,7 +17,11 @@ Path("scripts").mkdir(exist_ok=True)
 
 
 class CommandExecutor:
-    """Safe command and script execution with proper sanitization and error handling."""
+    """Safe command and script execution with proper sanitization and error handling.
+
+    All public methods are static and return simple values documenting success
+    or textual output to pass back into the AI loop.
+    """
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
@@ -76,7 +80,12 @@ class CommandExecutor:
 
     @staticmethod
     def filter_output(filter_command: str, working_dir: str = None) -> str:
-        """Apply filtering command to output."""
+        """Apply a shell filtering command to files in `working_dir` and return stdout.
+
+        This uses `subprocess.run(..., shell=True)` purposely because the
+        `return_to_ai` value is typically a small helper command. The caller
+        must ensure this is safe for their environment.
+        """
         try:
             result = subprocess.run(
                 filter_command,
@@ -94,7 +103,11 @@ class CommandExecutor:
 
     @staticmethod
     def run_ai_command(ai_response_json: str) -> str:
-        """Execute a single command from AI JSON response."""
+        """Execute a single command from AI JSON response.
+
+        Returns the filtered output (if `return_to_ai` was set) or a short
+        status message. Returns an error message string on failure.
+        """
         try:
             data = json.loads(ai_response_json)
         except json.JSONDecodeError as e:
@@ -134,7 +147,11 @@ class CommandExecutor:
 
     @staticmethod
     def run_script(ai_response_json: str) -> str:
-        """Execute a script from AI JSON response."""
+        """Execute a script described in the AI JSON response.
+
+        Saves the script to `scripts/` and executes it using the detected
+        interpreter. Returns filtered output or a status/error string.
+        """
         try:
             data = json.loads(ai_response_json)
         except json.JSONDecodeError as e:

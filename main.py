@@ -83,23 +83,20 @@ class PentestAutomation:
         logger.info(f'Starting pentest on: {target}')
         return True
 
-    def execute_ai_command(self, ai_response: str) -> Optional[str]:
-        """Execute AI command and return output."""
-        try:
-            cleaned_response = AICyberSecurityAssistant.clean_ai_response(ai_response)
-            if not self.ai.validate_response(cleaned_response):
-                logger.error('AI response validation failed')
-                return None
+    def execute_ai_command(self, data: dict, raw_json: str) -> Optional[str]:
+        """Execute AI command described by parsed `data` and return filtered output.
 
-            data = json.loads(cleaned_response)
+        `raw_json` should be the cleaned JSON string used by the executor.
+        """
+        try:
             action_type = data.get('type')
             logger.info(f'Executing {action_type}: {data.get("reason", "No reason provided")}')
             logger.info(f'Testing vulnerability: {data.get("vuln", "Not specified")}')
 
             if action_type == 'command':
-                return self.executor.run_ai_command(cleaned_response)
+                return self.executor.run_ai_command(raw_json)
             if action_type == 'script':
-                return self.executor.run_script(cleaned_response)
+                return self.executor.run_script(raw_json)
 
             logger.error(f'Unknown action type: {action_type}')
             return None
@@ -112,8 +109,8 @@ class PentestAutomation:
         if not self.get_target_info():
             return
 
-        if console:
-            console.rule('[bold green]Pentest Automation Started[/]')
+        # Startup banner
+        print_startup_banner(live=not USE_OFFLINE_FALLBACK, target=self.target, guide=self.guide, iterations=self.max_iterations)
         logger.info('Starting automated penetration testing')
 
         while self.iteration < self.max_iterations:
@@ -126,7 +123,7 @@ class PentestAutomation:
             if self.no_sleep:
                 sleep_time = 0
             else:
-                sleep_time = random.randint(8, 20)
+                sleep_time = random.randint(SLEEP_MIN, SLEEP_MAX)
             if sleep_time > 0:
                 message = f'Waiting {sleep_time} seconds before next action...'
                 if console:
@@ -136,40 +133,50 @@ class PentestAutomation:
                 sleep(sleep_time)
 
             if console:
-                context_text = self.context or f'Target: {self.target}\nAdditional context: {self.guide or "No additional guidance"}'
+                context_text = self.header + "\n\n" + "\n\n".join(self.past_entries[-CONTEXT_MAX_ENTRIES:])
                 console.print(Panel(context_text, title='Current Context', style='green'))
 
-            ai_response = self.ai.chat(self.context)
+            # Build the prompt from header + recent summaries
+            prompt = self.header + "\n\n" + "\n\n".join(self.past_entries[-CONTEXT_MAX_ENTRIES:])
+            ai_response = self.ai.chat(prompt)
             if not ai_response:
                 if console:
                     console.print('[bold red]No response from AI, retrying...[/]')
                 logger.warning('No response from AI, retrying...')
                 continue
 
-            output = self.execute_ai_command(ai_response)
+            cleaned = AICyberSecurityAssistant.clean_ai_response(ai_response)
+            try:
+                data = json.loads(cleaned)
+            except Exception:
+                logger.error('AI response JSON parse failed')
+                break
+
+            if not self.ai.validate_response(data):
+                logger.error('AI response validation failed')
+                break
+
+            output = self.execute_ai_command(data, cleaned)
             if output is None:
                 if console:
                     console.print('[bold red]Command execution failed, stopping[/]')
                 logger.error('Command execution failed, stopping')
                 break
 
+            # append a trimmed summary to history
+            summary = output if isinstance(output, str) else str(output)
+            if len(summary) > ENTRY_MAX_LEN:
+                summary = summary[:ENTRY_MAX_LEN] + '...'
+            self.past_entries.append(f'Iteration {self.iteration}: {summary}')
+
             if console:
                 console.print(Panel(output, title='Command Output', style='cyan'))
             else:
-                logger.info(output if len(output) <= 200 else f'{output[:200]}...')
+                logger.info(output if len(output) <= OUTPUT_LOG_TRUNC else f'{output[:OUTPUT_LOG_TRUNC]}...')
 
-            cleaned = AICyberSecurityAssistant.clean_ai_response(ai_response)
-            try:
-                data = json.loads(cleaned)
-                if not data.get('continue', True):
-                    logger.info('AI indicated the process should stop')
-                    break
-            except Exception:
-                pass
-
-            self.context = f'{self.context}\nLast command output: {output}'
-            if len(self.context) > 4000:
-                self.context = self.context[-4000:]
+            if not data.get('continue', True):
+                logger.info('AI indicated the process should stop')
+                break
 
         logger.info(f'Pentest automation completed after {self.iteration} iteration(s)')
 

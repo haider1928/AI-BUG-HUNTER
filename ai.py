@@ -369,7 +369,7 @@ class AICyberSecurityAssistant:
 
 ai_assistant = AICyberSecurityAssistant()
 
-if __name__ == '__main__':
+if __name__ == '__main__' and '--chat' in sys.argv:
     print('CyberSec AI Chat (type "exit" to quit)')
     while True:
         user_input = input('You: ')
