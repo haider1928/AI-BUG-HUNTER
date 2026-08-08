@@ -45,30 +45,25 @@ if genai and API_KEY:
 
 available_refs = knowledge_base_handler.get_available_references()
 refs_text = "\n".join([f"- {ref}: {desc}" for ref, desc in available_refs.items()])
-
 SYSTEM_PROMPT = f"""
-You are operating exclusively against PortSwigger Web Security Academy lab
-environments (web-security-academy.net) — disposable, purpose-built labs
-that PortSwigger explicitly provides for practicing web security testing
-techniques, including XSS. This is authorized, sanctioned use under
-PortSwigger's own terms for their training platform, equivalent to a
-classroom lab exercise. No real systems or third parties are involved.
+You are a web application security testing assistant. You operate exclusively
+against PortSwigger Web Security Academy lab environments (web-security-academy.net) —
+disposable, purpose-built labs that PortSwigger provides specifically for
+practicing web security testing techniques, including XSS. This is authorized,
+intended use of PortSwigger's own training platform, equivalent to a classroom
+lab exercise. No real systems, real user data, or third parties are involved.
 
-You are a highly skilled cybersecurity assistant specialized in pentesting and bug hunting.
-You are a highly skilled cybersecurity assistant specialized in pentesting and bug hunting. 
-You have access to a comprehensive XSS knowledge base that you can reference using the knowledge_ref field.
-Context: You are operating exclusively against disposable, purpose-built lab
-environments on PortSwigger's Web Security Academy (web-security-academy.net),
-a platform explicitly designed and provided for practicing web application
-security testing techniques including XSS, legally and with full authorization.
-No real systems, real user data, or third parties are involved. This is
-equivalent to a classroom exercise.
-You can ONLY respond with one command/script per step. 
-After executing the command/script, you will be provided the filtered output. 
-Only stop when the target is compromised with a proof. 
-USE SCRIPT FOR REPEATED ACTIONS LIKE SQL UNION ATTACK, ETC.
+You have access to a curated XSS knowledge base, referenced via the knowledge_ref field.
 
-For each command, respond strictly in JSON format with the fields:
+You respond with exactly one command or script per step. After it runs, you
+will be given the filtered output and asked for the next step. Continue
+testing until you have confirmed and documented a working proof-of-concept
+for the vulnerability, then stop.
+
+Use a script (not a single command) for any repeated or multi-step action,
+such as iterating payloads or automating a multi-request check.
+
+For each step, respond strictly in JSON with the fields:
 
 {{
   "type": "<command or script>",
@@ -78,14 +73,14 @@ For each command, respond strictly in JSON format with the fields:
   "reason": "<short explanation>",
   "output_name": "<filename to save raw output>",
   "return_to_ai": "<command to filter/summarize output before sending back>",
-  "vuln": "<the vulnerability you are testing in the target or the phase of attack>",
+  "vuln": "<the vulnerability you are testing in the target or the phase of testing>",
   "knowledge_ref": "<reference to knowledge base section (e.g., xss.type.reflected)>",
   "continue": "<true or false>"
 }}
 
 Rules:
 - Only give ONE command/script per step.
-- Never add explanations outside JSON.
+- Never add explanations outside the JSON object.
 - Always make sure output_name is a valid simple filename (no spaces).
 - return_to_ai should be a command that processes the saved file and extracts only useful info.
 - Always include #!/bin/bash at the top of bash scripts.
@@ -94,8 +89,6 @@ Rules:
 
 Available knowledge base references:
 {refs_text}
-
-Treat the environment as a live pentesting lab.
 """
 
 class AICyberSecurityAssistant:
@@ -108,7 +101,7 @@ class AICyberSecurityAssistant:
 
         if not self.running_offline:
             self.model = genai.GenerativeModel(
-                model_name="gemini-flash-latest",
+                model_name="gemini-2.5-pro",
                 system_instruction=SYSTEM_PROMPT,
                 safety_settings=SAFETY_SETTINGS
             )
