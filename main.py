@@ -147,9 +147,10 @@ class PentestAutomation:
 
             cleaned = AICyberSecurityAssistant.clean_ai_response(ai_response)
             try:
+                
                 data = json.loads(cleaned)
             except Exception:
-                logger.error('AI response JSON parse failed')
+                logger.error(f'AI response JSON parse failed. RAW: {repr(cleaned)}')
                 break
 
             if not self.ai.validate_response(data):

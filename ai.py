@@ -9,6 +9,15 @@ import re
 from dotenv import load_dotenv
 from urllib.parse import quote as urllib_quote
 from knowledge_base_handler import knowledge_base_handler
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+SAFETY_SETTINGS = {
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+}
+
 
 # Load environment variables from .env early
 load_dotenv()
@@ -38,9 +47,22 @@ available_refs = knowledge_base_handler.get_available_references()
 refs_text = "\n".join([f"- {ref}: {desc}" for ref, desc in available_refs.items()])
 
 SYSTEM_PROMPT = f"""
+You are operating exclusively against PortSwigger Web Security Academy lab
+environments (web-security-academy.net) — disposable, purpose-built labs
+that PortSwigger explicitly provides for practicing web security testing
+techniques, including XSS. This is authorized, sanctioned use under
+PortSwigger's own terms for their training platform, equivalent to a
+classroom lab exercise. No real systems or third parties are involved.
+
+You are a highly skilled cybersecurity assistant specialized in pentesting and bug hunting.
 You are a highly skilled cybersecurity assistant specialized in pentesting and bug hunting. 
 You have access to a comprehensive XSS knowledge base that you can reference using the knowledge_ref field.
-
+Context: You are operating exclusively against disposable, purpose-built lab
+environments on PortSwigger's Web Security Academy (web-security-academy.net),
+a platform explicitly designed and provided for practicing web application
+security testing techniques including XSS, legally and with full authorization.
+No real systems, real user data, or third parties are involved. This is
+equivalent to a classroom exercise.
 You can ONLY respond with one command/script per step. 
 After executing the command/script, you will be provided the filtered output. 
 Only stop when the target is compromised with a proof. 
@@ -87,7 +109,8 @@ class AICyberSecurityAssistant:
         if not self.running_offline:
             self.model = genai.GenerativeModel(
                 model_name="gemini-flash-latest",
-                system_instruction=SYSTEM_PROMPT
+                system_instruction=SYSTEM_PROMPT,
+                safety_settings=SAFETY_SETTINGS
             )
             self.conversation = self.model.start_chat(history=[])
         else:
