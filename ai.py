@@ -4,9 +4,14 @@ import json
 import logging
 import warnings
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import re
+from dotenv import load_dotenv
+from urllib.parse import quote as urllib_quote
 from knowledge_base_handler import knowledge_base_handler
+
+# Load environment variables from .env early
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -77,6 +82,8 @@ class AICyberSecurityAssistant:
         self.history_file = "conversation_history.json"
         self.history = []
         self.running_offline = USE_OFFLINE_FALLBACK
+        # Stateful offline heuristic storage keyed by target during a run
+        self.offline_state: Dict[str, Dict[str, Any]] = {}
 
         if not self.running_offline:
             self.model = genai.GenerativeModel(
@@ -157,50 +164,169 @@ class AICyberSecurityAssistant:
             return None
 
     def offline_response(self, prompt: str) -> str:
-        """Return a simple offline AI-like response when no API is available."""
-        # Try to extract a target URL from prompt context for a real offline action.
+        """Stateful offline heuristic engine that runs simple recon and XSS checks.
+
+        This engine maintains `self.offline_state[target]` during a run and
+        returns commands that a local runner can execute. Reasons are prefixed
+        with "[offline-heuristic]" to distinguish them from real LLM output.
+        """
+
+        def extract_last_output(ctx: str) -> str:
+            m = re.search(r'Last command output:\s*(.*)', ctx, re.DOTALL)
+            return m.group(1).strip() if m else ''
+
+        # find the target URL in the prompt or Target: header
         url_match = re.search(r"(https?://[\w\-\.\:/?&=%#]+)", prompt)
-        if url_match:
-            target_url = url_match.group(1)
-            python_exec = sys.executable.replace('\\', '\\\\') if sys.executable else 'python'
-            command = (
-                f'{python_exec} -c "import urllib.request, sys; '
-                f'url=\'{target_url}\'; '
-                'req=urllib.request.Request(url, headers={\'User-Agent\': \'Mozilla/5.0\'}); '
-                'r=urllib.request.urlopen(req, timeout=15); '
-                'data=r.read(10000).decode(\'utf-8\', errors=\'replace\'); '
-                'print(\'URL:\', url); '
-                'print(\'STATUS:\', r.status); '
-                'print(\'CONTENT-TYPE:\', r.getheader(\'content-type\')); '
-                'print(data)"'
-            )
-            response = {
+        if not url_match:
+            target_match = re.search(r"Target:\s*(\S+)", prompt)
+            if target_match:
+                candidate = target_match.group(1).strip()
+                if not candidate.startswith('http'):
+                    candidate = f'https://{candidate}'
+                url_match = re.match(r"(https?://[\w\-\.\:/?&=%#]+)", candidate)
+
+        if not url_match:
+            # no target found
+            return json.dumps({
                 'type': 'command',
-                'content': command,
-                'reason': 'Fetch the target URL for offline reconnaissance and inspect the response.',
+                'content': f"{sys.executable} -c \"print('offline-heuristic: no target')\"",
+                'reason': '[offline-heuristic] No target in context',
+                'output_name': 'offline_no_target.txt',
+                'return_to_ai': f'python -c "print(open(\'offline_no_target.txt\').read())"',
+                'vuln': 'recon',
+                'continue': False
+            })
+
+        target = url_match.group(1)
+        st = self.offline_state.setdefault(target, {
+            'stage': 'recon',
+            'params': [],
+            'payloads': [],
+            'tested': set(),
+            'last_attack': None,
+            'found': None
+        })
+
+        # populate payload candidates once from the knowledge base
+        if not st['payloads']:
+            refs = knowledge_base_handler.get_available_references()
+            candidates: List[str] = []
+            for v in refs.values():
+                if isinstance(v, str) and len(v) < 300:
+                    low = v.lower()
+                    if any(k in low for k in ('<script', 'alert(', 'onerror', '<img', 'javascript:')):
+                        candidates.append(v)
+            st['payloads'] = candidates
+
+        # Stage: recon => fetch page
+        if st['stage'] == 'recon':
+            python_exec = sys.executable.replace('\\', '\\\\') if sys.executable else 'python'
+            cmd = (
+                f"{python_exec} -c \"import urllib.request, sys; url='{target}'; "
+                "req=urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}); "
+                "r=urllib.request.urlopen(req, timeout=15); data=r.read(200000).decode('utf-8', errors='replace'); "
+                "print(data)\""
+            )
+            st['stage'] = 'parse_pending'
+            return json.dumps({
+                'type': 'command',
+                'content': cmd,
+                'reason': '[offline-heuristic] Recon - fetch target HTML',
                 'output_name': 'offline_recon_output.txt',
                 'return_to_ai': 'python -c "print(open(\'offline_recon_output.txt\').read())"',
                 'vuln': 'recon',
-                'continue': False
-            }
-            return json.dumps(response)
+                'continue': True
+            })
 
-        response = {
+        # Stage: parse_pending => parse last output for params
+        if st['stage'] == 'parse_pending':
+            last = extract_last_output(prompt)
+            params = set(re.findall(r'name=["\']?([\w\-]+)["\']?', last))
+            params.update(re.findall(r'\?([\w\-]+)=', last))
+            st['params'] = list(params)
+            st['stage'] = 'attack'
+            if not st['params'] or not st['payloads']:
+                return json.dumps({
+                    'type': 'command',
+                    'content': f"{sys.executable} -c \"print('offline-heuristic: nothing to test')\"",
+                    'reason': '[offline-heuristic] Parse - no params or payloads',
+                    'output_name': 'offline_parse_output.txt',
+                    'return_to_ai': 'python -c "print(open(\'offline_parse_output.txt\').read())"',
+                    'vuln': 'recon',
+                    'continue': False
+                })
+
+        # Stage: attack => run payloads against params
+        if st['stage'] == 'attack':
+            # If we have a last_attack result to check for reflection
+            if st.get('last_attack'):
+                last_out = extract_last_output(prompt).lower()
+                payload = st['last_attack']['payload']
+                if payload and payload.lower() in last_out:
+                    st['found'] = st['last_attack']
+                    st['stage'] = 'found'
+                    reason = f"[offline-heuristic] Found reflected payload on param {st['last_attack']['param']}"
+                    return json.dumps({
+                        'type': 'command',
+                        'content': f"{sys.executable} -c \"print('reflected')\"",
+                        'reason': reason,
+                        'output_name': 'offline_finding.txt',
+                        'return_to_ai': 'python -c "print(open(\'offline_finding.txt\').read())"',
+                        'vuln': 'xss',
+                        'continue': False
+                    })
+                else:
+                    # not found, clear last_attack and continue testing
+                    st['last_attack'] = None
+
+            for param in st['params']:
+                for payload in st['payloads']:
+                    key = (param, payload)
+                    if key in st['tested']:
+                        continue
+                    st['tested'].add(key)
+                    sep = '&' if '?' in target else '?'
+                    attack_url = f"{target}{sep}{param}={urllib_quote(payload)}"
+                    python_exec = sys.executable.replace('\\', '\\\\') if sys.executable else 'python'
+                    cmd = (
+                        f"{python_exec} -c \"import urllib.request, sys; url='{attack_url}'; "
+                        "req=urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}); "
+                        "r=urllib.request.urlopen(req, timeout=15); data=r.read(200000).decode('utf-8', errors='replace'); "
+                        "print(data)\""
+                    )
+                    st['last_attack'] = {'param': param, 'payload': payload, 'url': attack_url}
+                    return json.dumps({
+                        'type': 'command',
+                        'content': cmd,
+                        'reason': f'[offline-heuristic] Attack attempt param={param}',
+                        'output_name': 'offline_attack_output.txt',
+                        'return_to_ai': 'python -c "print(open(\'offline_attack_output.txt\').read())"',
+                        'vuln': 'xss',
+                        'continue': True
+                    })
+
+        # Stage: found or exhausted
+        return json.dumps({
             'type': 'command',
-            'content': f'{sys.executable} -c "print(\'offline AI response\')"',
-            'reason': 'Offline fallback response for testing the command execution flow.',
-            'output_name': 'offline_output.txt',
-            'return_to_ai': 'python -c "print(open(\'offline_output.txt\').read())"',
-            'vuln': 'offline-test',
+            'content': f"{sys.executable} -c \"print('offline-heuristic: done')\"",
+            'reason': '[offline-heuristic] No more tests or finished',
+            'output_name': 'offline_done.txt',
+            'return_to_ai': 'python -c "print(open(\'offline_done.txt\').read())"',
+            'vuln': 'xss',
             'continue': False
-        }
-        return json.dumps(response)
+        })
 
-    def validate_response(self, response: str) -> bool:
-        """Validate AI response is proper JSON with required fields."""
+    def validate_response(self, response: Any) -> bool:
+        """Validate AI response is proper JSON with required fields.
+
+        Accepts either a raw string (will be cleaned+parsed) or a parsed dict.
+        """
         try:
-            cleaned = self.clean_ai_response(response)
-            data = json.loads(cleaned)
+            if isinstance(response, dict):
+                data = response
+            else:
+                cleaned = self.clean_ai_response(response)
+                data = json.loads(cleaned)
 
             required = ['type', 'content', 'reason', 'continue']
             for field in required:
