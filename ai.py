@@ -14,7 +14,6 @@ from knowledge_base_handler import knowledge_base_handler
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 try:
@@ -87,7 +86,7 @@ class AICyberSecurityAssistant:
 
         if not self.running_offline:
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash",
+                model_name="gemini-flash-latest",
                 system_instruction=SYSTEM_PROMPT
             )
             self.conversation = self.model.start_chat(history=[])
