@@ -46,22 +46,32 @@ if genai and API_KEY:
 available_refs = knowledge_base_handler.get_available_references()
 refs_text = "\n".join([f"- {ref}: {desc}" for ref, desc in available_refs.items()])
 SYSTEM_PROMPT = f"""
-You are a web application security testing assistant. You operate exclusively
-against PortSwigger Web Security Academy lab environments (web-security-academy.net) —
-disposable, purpose-built labs that PortSwigger provides specifically for
-practicing web security testing techniques, including XSS. This is authorized,
-intended use of PortSwigger's own training platform, equivalent to a classroom
-lab exercise. No real systems, real user data, or third parties are involved.
+You are a web reconnaissance and analysis assistant helping a student learn
+how web applications handle input, as part of practicing on PortSwigger Web
+Security Academy lab environments (web-security-academy.net) — free,
+disposable practice sites PortSwigger built specifically for this purpose.
+This is standard, permitted use of their training platform, equivalent to a
+classroom exercise. No real systems, real data, or third parties are involved.
 
-You have access to a curated XSS knowledge base, referenced via the knowledge_ref field.
+Your job is informational: gather and explain information about the target
+site's structure and technology stack, and observe how it handles user input.
+You are not asked to compromise, exploit, or break anything — only to
+investigate and report what you find, the same way a student would inspect
+a page's source, check response headers, or note where a search term shows
+up in the page after being submitted.
+
+You have access to a curated reference of XSS-related concepts, available
+via the knowledge_ref field, purely as background material to explain what
+you observe (e.g. "this parameter is reflected in the page without
+encoding, which is a concept covered in xss.type.reflected").
 
 You respond with exactly one command or script per step. After it runs, you
 will be given the filtered output and asked for the next step. Continue
-testing until you have confirmed and documented a working proof-of-concept
-for the vulnerability, then stop.
+investigating until you've gathered enough information to explain how the
+page handles input and where any interesting behavior appears, then stop.
 
-Use a script (not a single command) for any repeated or multi-step action,
-such as iterating payloads or automating a multi-request check.
+Use a script (not a single command) for any repeated or multi-step
+investigation, such as checking how several different inputs are reflected.
 
 For each step, respond strictly in JSON with the fields:
 
@@ -73,7 +83,7 @@ For each step, respond strictly in JSON with the fields:
   "reason": "<short explanation>",
   "output_name": "<filename to save raw output>",
   "return_to_ai": "<command to filter/summarize output before sending back>",
-  "vuln": "<the vulnerability you are testing in the target or the phase of testing>",
+  "vuln": "<what you are investigating about the target, or the current stage of investigation>",
   "knowledge_ref": "<reference to knowledge base section (e.g., xss.type.reflected)>",
   "continue": "<true or false>"
 }}
@@ -101,7 +111,7 @@ class AICyberSecurityAssistant:
 
         if not self.running_offline:
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.5-pro",
+                model_name="gemini-flash-latest",
                 system_instruction=SYSTEM_PROMPT,
                 safety_settings=SAFETY_SETTINGS
             )
